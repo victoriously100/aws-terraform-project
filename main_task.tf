@@ -9,52 +9,67 @@ We have an S3 Bucket with host static site enabled and created a Cloudfront dist
 It has ACM Certs in London and N.Virginia for the ALB and CloudFront with automated DNS validation which creates 2 CNAME record in Hosted Zone
 We have two Route 53 A records for ALB and Cloudfront which we later used as Primary and Secondary on an Route 53 Health Check Failover policy
 */
+# Terraform configuration for AWS infrastructure
+
 provider "aws" {
   alias   = "eu_west_2"
-  region  = "eu-west-2"
-  profile = "default"
+  region  = var.aws_region_eu
+  profile = var.aws_profile
 }
+
 provider "aws" {
   alias   = "us_east_1"
-  region  = "us-east-1"
-  profile = "default"
+  region  = var.aws_region_us
+  profile = var.aws_profile
 }
 
 # VPC
 resource "aws_vpc" "demo_test" {
-  cidr_block = "10.0.0.0/24" #256 IPs CIDR range
-  enable_dns_support = true
+  cidr_block           = var.vpc_cidr_block
+  enable_dns_support   = true
   enable_dns_hostnames = true
-  tags = { Name = "demo-test" }
+  tags                 = { Name = var.vpc_name }
 }
 
 # Internet Gateway
 resource "aws_internet_gateway" "demo_igw" {
   vpc_id = aws_vpc.demo_test.id
-  tags = { Name = "demo-igw" }
+  tags   = { Name = var.igw_name }
 }
 
 # Two Public Subnets
+/*
 resource "aws_subnet" "demo_pub_sub1" {
-  vpc_id = aws_vpc.demo_test.id
-  cidr_block = "10.0.0.0/25" #128 IPs
+  vpc_id                  = aws_vpc.demo_test.id
+  cidr_block              = var.public_subnet_1_cidr
   map_public_ip_on_launch = true
-  availability_zone = "eu-west-2a"
-  tags = { Name = "demo-pub-sub1" }
+  availability_zone       = var.availability_zone_1
+  tags                    = { Name = var.public_subnet_1_name }
+}
+resource "aws_subnet" "demo_pub_sub2" {
+  vpc_id                  = aws_vpc.demo_test.id
+  cidr_block              = var.public_subnet_2_cidr
+  map_public_ip_on_launch = true
+  availability_zone       = var.availability_zone_2
+  tags                    = { Name = var.public_subnet_2_name }
+}
+*/
+# Two Public Subnets
+resource "aws_subnet" "demo_pub_sub" {
+  count                   = length(var.public_subnets)
+  vpc_id                  = aws_vpc.demo_test.id
+  cidr_block              = var.public_subnets[count.index].cidr_block  # Fix attribute name
+  map_public_ip_on_launch = true
+  availability_zone       = var.public_subnets[count.index].availability_zone  # Fix attribute name
+  tags                    = { Name = var.public_subnets[count.index].subnet_name }  # Fix attribute name
 }
 
-resource "aws_subnet" "demo_pub_sub2" {
-  vpc_id = aws_vpc.demo_test.id
-  cidr_block = "10.0.0.128/25" #128 IPs
-  map_public_ip_on_launch = true
-  availability_zone = "eu-west-2b"
-  tags = { Name = "demo-pub-sub2" }
-}
 
 # Route Tables with routes as seperate resources
+/*
 resource "aws_route_table" "pub_rt1" {
   vpc_id = aws_vpc.demo_test.id
-  tags = { Name = "public-route-table-1" }
+  tags = { Name = var.route_table_1_name }
 }
 
 resource "aws_route" "pub_route1" { # created the route as a resource of its own
@@ -68,9 +83,9 @@ resource "aws_route_table_association" "pub_assoc1" {
   route_table_id = aws_route_table.pub_rt1.id
 }
 
-resource "aws_route_table" "pub_rt2" { 
+resource "aws_route_table" "pub_rt2" {
   vpc_id = aws_vpc.demo_test.id
-  tags = { Name = "public-route-table-2" }
+  tags = { Name = var.route_table_2_name}
 }
 
 resource "aws_route" "pub_route2" { # created the route as a resource of its own
@@ -84,75 +99,94 @@ resource "aws_route_table_association" "pub_assoc2" {
   route_table_id = aws_route_table.pub_rt2.id
 }
 
+*/
+
+# Route Tables and Associations (Using for_each)
+resource "aws_route_table" "pub_rt" {
+  for_each = var.public_route_tables
+  vpc_id   = aws_vpc.demo_test.id
+  tags     = { Name = each.value }
+}
+
+resource "aws_route" "pub_route" {
+  for_each               = aws_route_table.pub_rt
+  route_table_id         = each.value.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.demo_igw.id
+}
+
+resource "aws_route_table_association" "pub_assoc" {
+  for_each       = aws_route_table.pub_rt
+  subnet_id      = element(aws_subnet.demo_pub_sub[*].id, index(keys(var.public_route_tables), each.key))
+  route_table_id = each.value.id
+}
+
+
 # Security Group
 resource "aws_security_group" "demo_sg" {
   vpc_id = aws_vpc.demo_test.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["188.29.107.168/32"] #["192.168.0.32/32"]
-  }/* Only my exact IP should be selected
-      I tried to automate the pulling of this IP but couldn't tho I have a manual way add public at home network
-    */
-  ingress { # HTTP inbound traffic
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress { # HTTPS inbound traffic 
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  
+  dynamic "ingress" { # HTTP & HTTPS inbound traffic
+    for_each = var.ingress_rules
+    content {
+      from_port   = ingress.value["from_port"]
+      to_port     = ingress.value["to_port"]
+      protocol    = ingress.value["protocol"]
+      cidr_blocks = ingress.value["cidr_blocks"]
+    }
   }
 
   egress { # Outbound traffic
     from_port   = 0
     to_port     = 0
-    protocol    = "-1" #all ports
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
-# Two EC2 Instances in both Subnets
-resource "aws_instance" "demo_instance1" {
-  ami           = "ami-091f18e98bc129c4e" # Ubuntu AMI
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.demo_pub_sub1.id
+# Launch Template
+resource "aws_launch_template" "test_launch_temp" {
+  name_prefix   = var.launch_template_name
+  image_id      = var.ami_id # Ubuntu AMI variable
+  instance_type = var.instance_type
+  key_name      = var.key_name#Key Pem with perm of 400
   vpc_security_group_ids = [aws_security_group.demo_sg.id]
-  key_name      = "aws-demo-test" #Key Pem with perm of 400
 
-  user_data = <<-EOF
+  user_data = base64encode(<<-EOF
               #!/bin/bash
               sudo apt update -y
               sudo apt install apache2 -y
-              echo "Welcome to my Ubuntu page" > /var/www/html/index.html
+              echo "Welcome to my ASG instance" > /var/www/html/index.html
               sudo systemctl start apache2
               sudo systemctl enable apache2
               EOF
-  tags = { Name = "demo-instance1" }
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "asg-instance"
+    }
+  }
 }
-  
-resource "aws_instance" "demo_instance2" {
-  ami           = "ami-091f18e98bc129c4e"
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.demo_pub_sub2.id
-  vpc_security_group_ids = [aws_security_group.demo_sg.id]
-  key_name      = "aws-demo-test"
 
-  user_data = <<-EOF
-              #!/bin/bash
-              sudo apt update -y
-              sudo apt install apache2 -y
-              echo "Hi this is 2nd Ubuntu page" > /var/www/html/index.html
-              sudo systemctl start apache2
-              sudo systemctl enable apache2
-              EOF
-  tags = { Name = "demo-instance2" }
+# Auto Scaling Group (ASG)
+resource "aws_autoscaling_group" "demo_asg" {
+  launch_template {
+    id      = aws_launch_template.test_launch_temp.id
+    version = "$Latest"
+  }
+
+  vpc_zone_identifier = aws_subnet.demo_pub_sub[*].id
+  min_size            = var.asg_min_size
+  max_size            = var.asg_max_size
+  desired_capacity    = var.asg_desired_capacity
+
+  tag {
+    key                 = "Name"
+    value               = "asg-instance"
+    propagate_at_launch = true
+  }
 }
 
 # Application Load Balancer
@@ -161,7 +195,7 @@ resource "aws_lb" "demo_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.demo_sg.id]
-  subnets            = [aws_subnet.demo_pub_sub1.id, aws_subnet.demo_pub_sub2.id]
+  subnets            = aws_subnet.demo_pub_sub[*].id
 }
 
 # Target Group
@@ -171,17 +205,11 @@ resource "aws_lb_target_group" "demo_tg" {
   protocol = "HTTP"
   vpc_id   = aws_vpc.demo_test.id
 }
-# Attach the instances to the TG
-resource "aws_lb_target_group_attachment" "demo_attach1" {
-  target_group_arn = aws_lb_target_group.demo_tg.arn
-  target_id        = aws_instance.demo_instance1.id
-  port            = 80
-}
 
-resource "aws_lb_target_group_attachment" "demo_attach2" {
-  target_group_arn = aws_lb_target_group.demo_tg.arn
-  target_id        = aws_instance.demo_instance2.id
-  port            = 80
+# ASG Target Group Attachment
+resource "aws_autoscaling_attachment" "asg_tg_attachment" {
+  autoscaling_group_name = aws_autoscaling_group.demo_asg.id
+  lb_target_group_arn    = aws_lb_target_group.demo_tg.arn
 }
 
 # ALB Listener
@@ -195,7 +223,6 @@ resource "aws_lb_listener" "http_listener" {
     target_group_arn = aws_lb_target_group.demo_tg.arn
   }
 }
-
 #added S3 Cloudfront, secondary part from here
 
 # S3 Bucket
@@ -218,6 +245,10 @@ resource "aws_s3_bucket_public_access_block" "web_bucket_block" {
   ignore_public_acls      = false
   restrict_public_buckets = false
 }
+
+resource "aws_s3_bucket_policy" "web_bucket_policy" {
+  bucket = aws_s3_bucket.web_bucket.id
+
 /*
 # Use these objects to upload html file with maintenance image dynamically
 resource "aws_s3_object" "index_html" {
@@ -234,9 +265,6 @@ resource "aws_s3_object" "image_file" {
   content_type = "image/png"
 }
 */
-resource "aws_s3_bucket_policy" "web_bucket_policy" {
-  bucket = aws_s3_bucket.web_bucket.id
-
   policy = <<POLICY
 {
   "Version": "2012-10-17",
@@ -256,7 +284,7 @@ POLICY
 resource "aws_cloudfront_distribution" "s3_distribution" {
   origin {
     domain_name = aws_s3_bucket.web_bucket.bucket_regional_domain_name #aws_s3_bucket.web_bucket.website_endpoint
-    origin_id   = "S3-web-seeksdevstraining"
+    origin_id   = "web.seeksdevstraining.com"
   }
 
   enabled             = true
@@ -264,7 +292,7 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
 
   default_cache_behavior {
     viewer_protocol_policy = "allow-all"
-    target_origin_id       = "S3-web-seeksdevstraining"
+    target_origin_id       = "web.seeksdevstraining.com"
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
 
@@ -296,13 +324,13 @@ variable "cloudfront_certificate_arn" {
 
 # ACM Certificates
 resource "aws_acm_certificate" "alb_cert" {
-  domain_name       = "*.seeksdevstraining.com"
+  domain_name       = var.alb_cert_domain
   validation_method = "DNS"
   provider         = aws.eu_west_2 # London 
 }
 
 resource "aws_acm_certificate" "cloudfront_cert" {
-  domain_name       = "web.seeksdevstraining.com"
+  domain_name       = var.cloudfront_cert_domain
   validation_method = "DNS"
   provider         = aws.us_east_1 # N.Virginia
 }
@@ -311,7 +339,7 @@ resource "aws_acm_certificate" "cloudfront_cert" {
 resource "aws_route53_record" "alb_cert_validation" {
   for_each = { for dvo in aws_acm_certificate.alb_cert.domain_validation_options : dvo.domain_name => dvo }
 
-  zone_id = "Z03534432K2YUY96QKS9O"  # Your Route 53 Hosted Zone ID
+  zone_id = var.route53_zone_id # Your Route 53 Hosted Zone ID
   name    = each.value.resource_record_name
   type    = each.value.resource_record_type
   ttl     = 60
@@ -321,7 +349,7 @@ resource "aws_route53_record" "alb_cert_validation" {
 resource "aws_route53_record" "cloudfront_cert_validation" {
   for_each = { for dvo in aws_acm_certificate.cloudfront_cert.domain_validation_options : dvo.domain_name => dvo }
 
-  zone_id = "Z03534432K2YUY96QKS9O"  # Your Route 53 Hosted Zone ID
+  zone_id = var.route53_zone_id # Your Route 53 Hosted Zone ID
   name    = each.value.resource_record_name
   type    = each.value.resource_record_type
   ttl     = 60
@@ -344,7 +372,7 @@ resource "aws_lb_listener" "https_listener" {
 
 # Route 53 Records
 resource "aws_route53_record" "cloudfront_dns" {
-  zone_id = "Z03534432K2YUY96QKS9O"
+  zone_id = var.route53_zone_id
   name    = "web.seeksdevstraining.com"
   type    = "A"
   alias {
@@ -355,7 +383,7 @@ resource "aws_route53_record" "cloudfront_dns" {
 }
 
 resource "aws_route53_record" "alb_dns" {
-  zone_id = "Z03534432K2YUY96QKS9O" # my Route 53 Hosted Zone ID
+  zone_id = var.route53_zone_id #my Route 53 Hosted Zone ID
   name    = "web.seeksdevstraining.com"
   type    = "A"
   alias {
@@ -370,7 +398,7 @@ resource "aws_route53_record" "alb_dns" {
 
 # Route 53 Health Check
 resource "aws_route53_health_check" "demo_server_check" {
-  fqdn              = "web.seeksdevstraining.com" #lsting to monitor my domain name listed using fqdn
+  fqdn              = "web.seeksdevstraining.com" #listening to monitor my domain name listed using fqdn
   port              = 80
   type              = "HTTP"
   failure_threshold = 3
@@ -382,7 +410,7 @@ resource "aws_route53_health_check" "demo_server_check" {
 
 # Route 53 Failover Policy
 resource "aws_route53_record" "failover_record_primary" {
-  zone_id = "Z03534432K2YUY96QKS9O"
+  zone_id = var.route53_zone_id
   name    = "web.seeksdevstraining.com"
   type    = "A"
   set_identifier = "Primary-ALB"
@@ -398,7 +426,7 @@ resource "aws_route53_record" "failover_record_primary" {
 }
 
 resource "aws_route53_record" "failover_record_secondary" {
-  zone_id = "Z03534432K2YUY96QKS9O"
+  zone_id = var.route53_zone_id
   name    = "web.seeksdevstraining.com"
   type    = "A"
   set_identifier = "Secondary-CloudFront"
