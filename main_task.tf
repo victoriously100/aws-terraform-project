@@ -10,7 +10,6 @@ It has ACM Certs in London and N.Virginia for the ALB and CloudFront with automa
 We have two Route 53 A records for ALB and Cloudfront which we later used as Primary and Secondary on an Route 53 Health Check Failover policy
 */
 # Terraform configuration for AWS infrastructure
-
 provider "aws" {
   alias   = "eu_west_2"
   region  = var.aws_region_eu
@@ -64,43 +63,6 @@ resource "aws_subnet" "demo_pub_sub" {
   tags                    = { Name = var.public_subnets[count.index].subnet_name }  # Fix attribute name
 }
 
-
-# Route Tables with routes as seperate resources
-/*
-resource "aws_route_table" "pub_rt1" {
-  vpc_id = aws_vpc.demo_test.id
-  tags = { Name = var.route_table_1_name }
-}
-
-resource "aws_route" "pub_route1" { # created the route as a resource of its own
-  route_table_id = aws_route_table.pub_rt1.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id = aws_internet_gateway.demo_igw.id
-}
-
-resource "aws_route_table_association" "pub_assoc1" {
-  subnet_id = aws_subnet.demo_pub_sub1.id
-  route_table_id = aws_route_table.pub_rt1.id
-}
-
-resource "aws_route_table" "pub_rt2" {
-  vpc_id = aws_vpc.demo_test.id
-  tags = { Name = var.route_table_2_name}
-}
-
-resource "aws_route" "pub_route2" { # created the route as a resource of its own
-  route_table_id = aws_route_table.pub_rt2.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id = aws_internet_gateway.demo_igw.id
-}
-
-resource "aws_route_table_association" "pub_assoc2" {
-  subnet_id = aws_subnet.demo_pub_sub2.id
-  route_table_id = aws_route_table.pub_rt2.id
-}
-
-*/
-
 # Route Tables and Associations (Using for_each)
 resource "aws_route_table" "pub_rt" {
   for_each = var.public_route_tables
@@ -120,7 +82,6 @@ resource "aws_route_table_association" "pub_assoc" {
   subnet_id      = element(aws_subnet.demo_pub_sub[*].id, index(keys(var.public_route_tables), each.key))
   route_table_id = each.value.id
 }
-
 
 # Security Group
 resource "aws_security_group" "demo_sg" {
@@ -270,6 +231,7 @@ resource "aws_s3_object" "image_file" {
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "PublicReadGetObject",
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
@@ -279,7 +241,6 @@ resource "aws_s3_object" "image_file" {
 }
 POLICY
 }
-
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "s3_distribution" {
   origin {

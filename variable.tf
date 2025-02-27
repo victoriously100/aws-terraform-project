@@ -46,12 +46,12 @@ variable "public_subnets" {
   }))
   default = [
     {
-      cidr_block        = "10.0.1.0/25"
+      cidr_block        = "10.0.0.0/25"
       availability_zone = "eu-west-2a"
       subnet_name       = "public_subnet_1"
     },
     {
-      cidr_block        = "10.0.128.0/25"
+      cidr_block        = "10.0.0.128/25"
       availability_zone = "eu-west-2b"
       subnet_name       = "public_subnet_2"
     }
