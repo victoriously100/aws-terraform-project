@@ -68,16 +68,6 @@ variable "availability_zone_2" {
   default     = "eu-west-2b"
 }
 #Route Table variables
-variable "route_table_1_name" {
-  description = "Name of the first public route table"
-  default     = "public-route-table-1"
-}
-
-variable "route_table_2_name" {
-  description = "Name of the second public route table"
-  default     = "public-route-table-2"
-}
-
 variable "public_route_tables" {
   description = "Map of route tables with their names"
   type        = map(string)
