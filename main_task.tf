@@ -35,35 +35,17 @@ resource "aws_internet_gateway" "demo_igw" {
   vpc_id = aws_vpc.demo_test.id
   tags   = { Name = var.igw_name }
 }
-
-# Two Public Subnets
-/*
-resource "aws_subnet" "demo_pub_sub1" {
-  vpc_id                  = aws_vpc.demo_test.id
-  cidr_block              = var.public_subnet_1_cidr
-  map_public_ip_on_launch = true
-  availability_zone       = var.availability_zone_1
-  tags                    = { Name = var.public_subnet_1_name }
-}
-resource "aws_subnet" "demo_pub_sub2" {
-  vpc_id                  = aws_vpc.demo_test.id
-  cidr_block              = var.public_subnet_2_cidr
-  map_public_ip_on_launch = true
-  availability_zone       = var.availability_zone_2
-  tags                    = { Name = var.public_subnet_2_name }
-}
-*/
 # Two Public Subnets
 resource "aws_subnet" "demo_pub_sub" {
   count                   = length(var.public_subnets)
   vpc_id                  = aws_vpc.demo_test.id
-  cidr_block              = var.public_subnets[count.index].cidr_block  # Fix attribute name
+  cidr_block              = var.public_subnets[count.index].cidr_block  
   map_public_ip_on_launch = true
-  availability_zone       = var.public_subnets[count.index].availability_zone  # Fix attribute name
-  tags                    = { Name = var.public_subnets[count.index].subnet_name }  # Fix attribute name
+  availability_zone       = var.public_subnets[count.index].availability_zone  
+  tags                    = { Name = var.public_subnets[count.index].subnet_name }
 }
 
-# Route Tables and Associations (Using for_each)
+# Route Tables and Associations
 resource "aws_route_table" "pub_rt" {
   for_each = var.public_route_tables
   vpc_id   = aws_vpc.demo_test.id
@@ -110,7 +92,7 @@ resource "aws_launch_template" "test_launch_temp" {
   name_prefix   = var.launch_template_name
   image_id      = var.ami_id # Ubuntu AMI variable
   instance_type = var.instance_type
-  key_name      = var.key_name#Key Pem with perm of 400
+  key_name      = var.key_name #Key Pem with perm of 400
   vpc_security_group_ids = [aws_security_group.demo_sg.id]
 
   user_data = base64encode(<<-EOF

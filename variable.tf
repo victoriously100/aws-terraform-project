@@ -87,9 +87,6 @@ variable "public_route_tables" {
   }
 }
 
-
-
-
 #Security Group variables
 variable "ingress_rules" {
   description = "List of ingress rules for the security group"
@@ -142,7 +139,7 @@ variable "instance_type" {
 variable "key_name" {
   description = "Key pair name for SSH access"
   type        = string
-  default     = "my-key"
+  default     = "aws-demo-test"
 }
 
 variable "asg_min_size" {
