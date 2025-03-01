@@ -61,7 +61,7 @@ resource "aws_route" "pub_route" {
 
 resource "aws_route_table_association" "pub_assoc" {
   for_each       = aws_route_table.pub_rt
-  subnet_id      = element(aws_subnet.demo_pub_sub[*].id, index(keys(var.public_route_tables), each.key))
+  subnet_id      = element(aws_subnet.demo_pub_sub[*].id, index(keys(var.public_route_tables), each.key)) #associate rt to specificc subnet using id via element function is used to select from a list
   route_table_id = each.value.id
 }
 
@@ -69,7 +69,7 @@ resource "aws_route_table_association" "pub_assoc" {
 resource "aws_security_group" "demo_sg" {
   vpc_id = aws_vpc.demo_test.id
   
-  dynamic "ingress" { # HTTP & HTTPS inbound traffic
+  dynamic "ingress" { # HTTP & HTTPS inbound traffic on declared on varible
     for_each = var.ingress_rules
     content {
       from_port   = ingress.value["from_port"]
@@ -82,7 +82,7 @@ resource "aws_security_group" "demo_sg" {
   egress { # Outbound traffic
     from_port   = 0
     to_port     = 0
-    protocol    = "-1"
+    protocol    = "-1" #all ports
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -95,11 +95,23 @@ resource "aws_launch_template" "test_launch_temp" {
   key_name      = var.key_name #Key Pem with perm of 400
   vpc_security_group_ids = [aws_security_group.demo_sg.id]
 
-  user_data = base64encode(<<-EOF
+user_data = base64encode(<<-EOF
               #!/bin/bash
               sudo apt update -y
               sudo apt install apache2 -y
-              echo "Welcome to my ASG instance" > /var/www/html/index.html
+
+              INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+
+              # Set instance name dynamically based on instance ID
+              INSTANCE_NAME="main-instance-${INSTANCE_ID}"
+
+              # Set tag using AWS CLI
+              aws ec2 create-tags --resources $INSTANCE_ID --tags Key=Name,Value=$INSTANCE_NAME --region ${var.aws_region_eu}
+
+              # Display message
+              echo "Welcome to My Instance - $INSTANCE_NAME" > /var/www/html/index.html
+
+              #Start and enable Apache
               sudo systemctl start apache2
               sudo systemctl enable apache2
               EOF
